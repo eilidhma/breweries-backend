@@ -1,6 +1,6 @@
 import pool from '../db';
 
-export const addFeaturesToBrewery = async(features: string[]): Promise<void> => {
+export const addFeaturesArray = async(features: string[]): Promise<void> => {
   const client = await pool.connect();
   console.log(features, 'features in model!');
   try {
