@@ -1,4 +1,5 @@
 import pool from '../db';
+import { batchCreateBreweryFeatureRelationships } from './brewery_feature_relationships';
 
 // Define the shape of a brewery
 export interface Brewery {
@@ -11,17 +12,38 @@ export interface Brewery {
   phone: string;
   website_url: string;
   country: string;
+  menu_url: string
+  social_media?: string[]
+  brewery_type?: string[]
 }
 
 // Get all breweries
 export const getAllBreweries = async (): Promise<Brewery[]> => {
-  const result = await pool.query('SELECT * FROM breweries ORDER BY name ASC');
+  const result = await pool.query(`
+    SELECT
+      breweries.*,
+      COALESCE(
+        ARRAY_AGG(brewery_features.feature_name ORDER BY brewery_features.feature_name)
+        FILTER (WHERE brewery_features.feature_name IS NOT NULL),
+        '{}'
+      ) AS features
+    FROM breweries
+    LEFT JOIN brewery_feature_relationships
+      ON breweries.id = brewery_feature_relationships.brewery_id
+    LEFT JOIN brewery_features
+      ON brewery_feature_relationships.feature_id = brewery_features.feature_id
+    GROUP BY breweries.id;
+  `);
+
   return result.rows;
 };
 
 // Get a single brewery by ID
 export const getBreweryById = async (id: number): Promise<Brewery | null> => {
-  const result = await pool.query('SELECT * FROM breweries WHERE id = $1', [id]);
+  const result = await pool.query(`
+    SELECT * FROM breweries WHERE id = $1
+  `,
+  [id]);
   return result.rows[0] || null;
 };
 
@@ -35,7 +57,8 @@ export const createBrewery = async (brewery: Omit<Brewery, 'id' | 'created_at' |
     postal_code,
     phone,
     website_url,
-    country
+    country,
+    menu_url
   } = brewery;
 
   console.log(brewery, "BREWERY ~~~~~~~~~~~~")
@@ -43,15 +66,79 @@ export const createBrewery = async (brewery: Omit<Brewery, 'id' | 'created_at' |
   const result = await pool.query(
     `
     INSERT INTO breweries
-    (name, address, city, province, postal_code, phone, website_url, country)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    (name, address, city, province, postal_code, phone, website_url, country, menu_url)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
     RETURNING *;
     `,
-    [name, address, city, province, postal_code, phone, website_url, country]
+    [name, address, city, province, postal_code, phone, website_url, country, menu_url]
   );
 
   return result.rows[0];
 };
+
+export const addBreweriesByBulk = async(breweries: Brewery[]) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    
+    const createdBreweries: Brewery[] = [];
+    const featureRelationships: Array<{ breweryId: number, featureNames: string[] }> = [];
+    
+    for (const breweryData of breweries) {
+      // Destructure to separate brewery_type and other fields
+      const { 
+        social_media, 
+        brewery_type = [], 
+        ...validBreweryData 
+      } = breweryData;
+      
+      // Insert brewery into database
+      const breweryQuery = `
+        INSERT INTO breweries(
+          name, city, address, postal_code, 
+          province, phone, website_url, country, menu_url
+        ) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `;
+      
+      const breweryValues = [
+        validBreweryData.name,
+        validBreweryData.city,
+        validBreweryData.address,
+        validBreweryData.postal_code,
+        validBreweryData.province,
+        validBreweryData.phone,
+        validBreweryData.website_url,
+        validBreweryData.country,
+        validBreweryData.menu_url
+      ];
+      
+      const breweryResult = await client.query(breweryQuery, breweryValues);
+      const newBrewery = breweryResult.rows[0];
+      createdBreweries.push(newBrewery);
+
+      if (brewery_type && brewery_type.length > 0) {
+        featureRelationships.push({
+          breweryId: newBrewery.id,
+          featureNames: brewery_type
+        });
+      }
+    }
+    
+    await batchCreateBreweryFeatureRelationships(featureRelationships);
+
+    await client.query('COMMIT');
+    return createdBreweries;
+    
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating breweries in bulk:', error);
+    throw new Error('Failed to create breweries in bulk');
+  } finally {
+    client.release();
+  }
+}
 
 // Delete a brewery
 export const deleteBrewery = async (id: number): Promise<void> => {

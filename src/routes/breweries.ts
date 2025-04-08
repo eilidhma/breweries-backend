@@ -3,6 +3,7 @@ import {
   getAllBreweries,
   getBreweryById,
   createBrewery,
+  addBreweriesByBulk,
   deleteBrewery,
   updateBrewery,
   Brewery,
@@ -23,13 +24,25 @@ router.get('/', async (_req: Request, res: Response) => {
   }
 });
 
-
 // POST /api/breweries
 router.post('/', async (req: Request, res: Response) => {
   const breweryData: Omit<Brewery, 'id' | 'created_at' | 'updated_at'> = req.body;
   try {
     const newBrewery = await createBrewery(breweryData);
     res.status(201).json(newBrewery);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create brewery' });
+  }
+});
+
+// POST /api/breweries/bulk
+router.post('/bulk', async (req: Request, res: Response) => {
+  const breweriesArray: Brewery[] = req.body;
+  
+  try {
+    const bulkAddBreweries = await addBreweriesByBulk(breweriesArray);
+    res.status(201).json(bulkAddBreweries);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create brewery' });

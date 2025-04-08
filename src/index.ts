@@ -9,7 +9,7 @@ dotenv.config();
 const app = express();
 const port = 3001;
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 app.use('/api/breweries', breweriesRouter);
 app.use('/api/brewery_features', breweryFeaturesRouter)
