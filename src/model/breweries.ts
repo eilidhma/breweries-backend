@@ -20,19 +20,27 @@ export interface Brewery {
 // Get all breweries
 export const getAllBreweries = async (): Promise<Brewery[]> => {
   const result = await pool.query(`
-    SELECT
+      SELECT
       breweries.*,
-      COALESCE(
-        ARRAY_AGG(brewery_features.feature_name ORDER BY brewery_features.feature_name)
-        FILTER (WHERE brewery_features.feature_name IS NOT NULL),
-        '{}'
-      ) AS features
+      COALESCE(features.feature_array, '{}') AS features,
+      COALESCE(social_media.platform_links, '{}'::jsonb) AS social_media
     FROM breweries
-    LEFT JOIN brewery_feature_relationships
-      ON breweries.id = brewery_feature_relationships.brewery_id
-    LEFT JOIN brewery_features
-      ON brewery_feature_relationships.feature_id = brewery_features.feature_id
-    GROUP BY breweries.id;
+    LEFT JOIN (
+      SELECT 
+        brewery_id,
+        ARRAY_AGG(DISTINCT brewery_features.feature_name ORDER BY brewery_features.feature_name) AS feature_array
+      FROM brewery_feature_relationships
+      JOIN brewery_features ON brewery_feature_relationships.feature_id = brewery_features.feature_id
+      GROUP BY brewery_id
+    ) features ON breweries.id = features.brewery_id
+    LEFT JOIN (
+      SELECT
+        brewery_id,
+        jsonb_object_agg(social_media_platforms.platform_name, brewery_social_media.url) AS platform_links
+      FROM brewery_social_media
+      JOIN social_media_platforms ON brewery_social_media.platform_id = social_media_platforms.platform_id
+      GROUP BY brewery_id
+    ) social_media ON breweries.id = social_media.brewery_id;
   `);
 
   return result.rows;
